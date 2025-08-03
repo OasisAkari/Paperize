@@ -175,7 +175,8 @@ class LockWallpaperService: Service() {
             lockGrayscalePercentage = settingsDataStoreImpl.getInt(SettingsConstants.LOCK_GRAYSCALE_PERCENTAGE) ?: 0,
             lockAlbumName = settingsDataStoreImpl.getString(SettingsConstants.LOCK_ALBUM_NAME) ?: "",
             homeAlbumName = settingsDataStoreImpl.getString(SettingsConstants.HOME_ALBUM_NAME) ?: "",
-            shuffle = settingsDataStoreImpl.getBoolean(SettingsConstants.SHUFFLE) ?: true
+            shuffle = settingsDataStoreImpl.getBoolean(SettingsConstants.SHUFFLE) ?: true,
+            freeze = settingsDataStoreImpl.getBoolean(SettingsConstants.FREEZE_ON_SCREEN_LOCK) ?: false
         )
     }
 

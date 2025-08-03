@@ -2,8 +2,11 @@ package com.anthonyla.paperize.feature.wallpaper.presentation
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context.POWER_SERVICE
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.PowerManager
+import android.util.Log
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -16,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
@@ -510,6 +514,20 @@ fun PaperizeApp(
                     if (settingsState.value.wallpaperSettings.enableChanger) {
                         scheduler.scheduleRefresh(refresh)
                     }
+                },
+
+                onFreezeChange = { freeze ->
+                    Log.d("PaperizeWallpaperChanger", "FreezeSwitch: $freeze")
+                    settingsViewModel.onEvent(SettingsEvent.SetFreeze(freeze))
+                    val powerManager = context.getSystemService(POWER_SERVICE) as PowerManager
+                    if (powerManager.isInteractive){
+                        Log.d("PaperizeWallpaperChanger", "Device is interactive.")
+                    }
+                    else {
+                        Log.d("PaperizeWallpaperChanger", "Device is not interactive.")
+                    }
+
+
                 }
             )
         }
@@ -710,7 +728,8 @@ private fun CoroutineScope.scheduleWallpaperUpdate(
             setLock = settingsState.wallpaperSettings.setLockWallpaper,
             changeStartTime = settingsState.scheduleSettings.changeStartTime,
             startTime = settingsState.scheduleSettings.startTime,
-            shuffle = settingsState.scheduleSettings.shuffle
+            shuffle = settingsState.scheduleSettings.shuffle,
+            freezeOnScreenLock = settingsState.scheduleSettings.freezeOnScreenLock
         )
 
         scheduler.scheduleWallpaperAlarm(
@@ -740,7 +759,8 @@ private fun CoroutineScope.updateWallpaperAlarm(
             setLock = settingsState.wallpaperSettings.setLockWallpaper,
             changeStartTime = settingsState.scheduleSettings.changeStartTime,
             startTime = settingsState.scheduleSettings.startTime,
-            shuffle = settingsState.scheduleSettings.shuffle
+            shuffle = settingsState.scheduleSettings.shuffle,
+            freezeOnScreenLock = settingsState.scheduleSettings.freezeOnScreenLock
         )
 
         scheduler.updateWallpaperAlarm(

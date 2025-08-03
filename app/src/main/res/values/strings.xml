@@ -180,6 +180,8 @@
   <string name="sort_by_last_modified_newest">Sort by Last Modified (Newest)</string>
   <string name="sort_by_last_modified_oldest">Sort by Last Modified (Oldest)</string>
   <string name="shuffle">Shuffle</string>
+  <string name="freeze" translatable="false">Freeze</string>
+  <string name="freeze_on_screen_lock" translatable="false">Freeze on screen lock</string>
   <string name="periodic_refresh">Periodic Refresh</string>
   <string name="hours_txt">Hours</string>
   <string name="days_txt">Days</string>
@@ -190,4 +192,5 @@
   <string name="darken_the_edges_of_the_image">Darken the edges of the image</string>
   <string name="make_the_colors_grayscale">Make the colors grayscale</string>
   <string name="shuffle_the_wallpapers">Shuffle the wallpapers</string>
+
 </resources>

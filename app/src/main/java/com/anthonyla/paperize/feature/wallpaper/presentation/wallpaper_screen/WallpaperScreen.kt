@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -42,6 +43,7 @@ import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.co
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.CurrentAndNextChange
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.CurrentSelectedAlbum
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.DarkenSwitchAndSlider
+import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.FreezeSwitch
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.GrayscaleSwitchAndSlider
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.IndividualSchedulingAndToggleRow
 import com.anthonyla.paperize.feature.wallpaper.presentation.wallpaper_screen.components.RefreshSwitch
@@ -81,7 +83,8 @@ fun WallpaperScreen(
     onChangeStartTimeToggle: (Boolean) -> Unit,
     onStartTimeChange: (TimePickerState) -> Unit,
     onShuffleCheck: (Boolean) -> Unit,
-    onRefreshChange: (Boolean) -> Unit
+    onRefreshChange: (Boolean) -> Unit,
+    onFreezeChange: (Boolean) -> Unit
 ) {
     val shouldShowScreen = wallpaperSettings.setHomeWallpaper || wallpaperSettings.setLockWallpaper
     val shouldShowSettings = shouldShowScreen && homeSelectedAlbum != null && lockSelectedAlbum != null
@@ -273,6 +276,10 @@ fun WallpaperScreen(
                     RefreshSwitch(
                         refresh = scheduleSettings.refresh,
                         onRefreshChange = onRefreshChange
+                    )
+                    FreezeSwitch(
+                        freeze = scheduleSettings.freezeOnScreenLock,
+                        onFreezeChange = onFreezeChange
                     )
                 }
             }

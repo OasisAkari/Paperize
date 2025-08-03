@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.app.WallpaperManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -12,6 +13,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
@@ -188,7 +190,8 @@ class HomeWallpaperService: Service() {
             lockGrayscalePercentage = settingsDataStoreImpl.getInt(SettingsConstants.LOCK_GRAYSCALE_PERCENTAGE) ?: 0,
             lockAlbumName = settingsDataStoreImpl.getString(SettingsConstants.LOCK_ALBUM_NAME) ?: "",
             homeAlbumName = settingsDataStoreImpl.getString(SettingsConstants.HOME_ALBUM_NAME) ?: "",
-            shuffle = settingsDataStoreImpl.getBoolean(SettingsConstants.SHUFFLE) ?: true
+            shuffle = settingsDataStoreImpl.getBoolean(SettingsConstants.SHUFFLE) ?: true,
+            freeze = settingsDataStoreImpl.getBoolean(SettingsConstants.FREEZE_ON_SCREEN_LOCK) ?: false
         )
     }
 
@@ -213,25 +216,162 @@ class HomeWallpaperService: Service() {
                 onDestroy()
                 return
             }
-            when {
-                // Case: Set home and lock screen wallpapers using separate albums (home screen and lock screen album)
-                settings.setHome && settings.setLock && scheduleSeparately -> {
-                    var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
-                    if (wallpaper == null) {
-                        val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
-                        else homeAlbum.totalWallpapers.map { it.wallpaperUri }
-                        wallpaper = newWallpapers.firstOrNull()
+            val powerManager = context.getSystemService(POWER_SERVICE) as PowerManager
+            if (settings.freeze){
+                Log.d("PaperizeWallpaperChanger", "Freeze is on.")
+            }
+            if (powerManager.isInteractive || !settings.freeze){
+                Log.d("PaperizeWallpaperChanger", "Device is interactive.")
+                when {
+                    // Case: Set home and lock screen wallpapers using separate albums (home screen and lock screen album)
+                    settings.setHome && settings.setLock && scheduleSeparately -> {
+                        var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
                         if (wallpaper == null) {
-                            Log.d("PaperizeWallpaperChanger", "No wallpaper found")
-                            albumRepository.cascadeDeleteAlbum(homeAlbum.album)
-                            onDestroy()
-                            return
+                            val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
+                            else homeAlbum.totalWallpapers.map { it.wallpaperUri }
+                            wallpaper = newWallpapers.firstOrNull()
+                            if (wallpaper == null) {
+                                Log.d("PaperizeWallpaperChanger", "No wallpaper found")
+                                albumRepository.cascadeDeleteAlbum(homeAlbum.album)
+                                onDestroy()
+                                return
+                            }
+                            else {
+                                val success = isValidUri(context, wallpaper)
+                                if (success) {
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
+                                    albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
+                                    setWallpaper(
+                                        context = context,
+                                        wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
+                                        darken = settings.darken,
+                                        darkenPercent = settings.homeDarkenPercentage,
+                                        scaling = settings.scaling,
+                                        blur = settings.blur,
+                                        blurPercent = settings.homeBlurPercentage,
+                                        vignette = settings.vignette,
+                                        vignettePercent = settings.homeVignettePercentage,
+                                        grayscale = settings.grayscale,
+                                        grayscalePercent = settings.homeGrayscalePercentage
+                                    )
+                                }
+                                else {
+                                    val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
+                                    if (wallpaperToDelete != null) {
+                                        albumRepository.deleteWallpaper(wallpaperToDelete)
+                                        albumRepository.upsertAlbumWithWallpaperAndFolder(
+                                            homeAlbum.copy(
+                                                wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
+                                                album = homeAlbum.album.copy(
+                                                    homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
+                                                    lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
+                                                )
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        else {
+                            val success = isValidUri(context, wallpaper)
+                            if ((homeInterval % lockInterval == 0) || (lockInterval % homeInterval == 0) && (settings.homeAlbumName == settings.lockAlbumName)) {
+                                delay(1000)
+                                selectedAlbum = albumRepository.getSelectedAlbums().first()
+                                homeAlbum = selectedAlbum.find { it.album.initialAlbumName == settings.homeAlbumName }
+                            }
+                            if (homeAlbum != null) {
+                                if (success) {
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
+                                    albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.drop(1)))
+                                    setWallpaper(
+                                        context = context,
+                                        wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
+                                        darken = settings.darken,
+                                        darkenPercent = settings.homeDarkenPercentage,
+                                        scaling = settings.scaling,
+                                        blur = settings.blur,
+                                        blurPercent = settings.homeBlurPercentage,
+                                        vignette = settings.vignette,
+                                        vignettePercent = settings.homeVignettePercentage,
+                                        grayscale = settings.grayscale,
+                                        grayscalePercent = settings.homeGrayscalePercentage
+                                    )
+                                }
+                                else {
+                                    val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
+                                    if (wallpaperToDelete != null) {
+                                        albumRepository.deleteWallpaper(wallpaperToDelete)
+                                        albumRepository.upsertAlbumWithWallpaperAndFolder(
+                                            homeAlbum.copy(
+                                                wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
+                                                album = homeAlbum.album.copy(
+                                                    homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
+                                                    lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
+                                                )
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Case: Set home and lock screen wallpapers using the same album (home screen album)
+                    settings.setHome && settings.setLock && !scheduleSeparately -> {
+                        var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
+                        if (wallpaper == null) {
+                            val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
+                            else homeAlbum.totalWallpapers.map { it.wallpaperUri }
+                            wallpaper = newWallpapers.firstOrNull()
+                            if (wallpaper == null) {
+                                Log.d("PaperizeWallpaperChanger", "No wallpaper found")
+                                albumRepository.cascadeDeleteAlbum(homeAlbum.album)
+                                onDestroy()
+                                return
+                            }
+                            else {
+                                val success = isValidUri(context, wallpaper)
+                                if (success) {
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
+                                    albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
+                                    setWallpaper(
+                                        context = context,
+                                        wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
+                                        darken = settings.darken,
+                                        darkenPercent = settings.homeDarkenPercentage,
+                                        scaling = settings.scaling,
+                                        blur = settings.blur,
+                                        blurPercent = settings.homeBlurPercentage,
+                                        vignette = settings.vignette,
+                                        vignettePercent = settings.homeVignettePercentage,
+                                        grayscale = settings.grayscale,
+                                        grayscalePercent = settings.homeGrayscalePercentage,
+                                        both = true
+                                    )
+                                }
+                                else {
+                                    val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
+                                    if (wallpaperToDelete != null) {
+                                        albumRepository.deleteWallpaper(wallpaperToDelete)
+                                        albumRepository.upsertAlbumWithWallpaperAndFolder(
+                                            homeAlbum.copy(
+                                                wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
+                                                album = homeAlbum.album.copy(
+                                                    homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
+                                                    lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
+                                                )
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
                         else {
                             val success = isValidUri(context, wallpaper)
                             if (success) {
+                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
                                 settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
-                                albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
+                                albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.drop(1)))
                                 setWallpaper(
                                     context = context,
                                     wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
@@ -243,8 +383,10 @@ class HomeWallpaperService: Service() {
                                     vignette = settings.vignette,
                                     vignettePercent = settings.homeVignettePercentage,
                                     grayscale = settings.grayscale,
-                                    grayscalePercent = settings.homeGrayscalePercentage
+                                    grayscalePercent = settings.homeGrayscalePercentage,
+                                    both = true
                                 )
+
                             }
                             else {
                                 val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
@@ -263,16 +405,62 @@ class HomeWallpaperService: Service() {
                             }
                         }
                     }
-                    else {
-                        val success = isValidUri(context, wallpaper)
-                        if ((homeInterval % lockInterval == 0) || (lockInterval % homeInterval == 0) && (settings.homeAlbumName == settings.lockAlbumName)) {
-                            delay(1000)
-                            selectedAlbum = albumRepository.getSelectedAlbums().first()
-                            homeAlbum = selectedAlbum.find { it.album.initialAlbumName == settings.homeAlbumName }
+                    // Case: Set home screen wallpaper (home screen album)
+                    settings.setHome -> {
+                        var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
+                        if (wallpaper == null) {
+                            val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
+                            else homeAlbum.totalWallpapers.map { it.wallpaperUri }
+                            wallpaper = newWallpapers.firstOrNull()
+                            if (wallpaper == null) {
+                                Log.d("PaperizeWallpaperChanger", "No wallpaper found")
+                                albumRepository.cascadeDeleteAlbum(homeAlbum.album)
+                                onDestroy()
+                                return
+                            }
+                            else {
+                                val success = isValidUri(context, wallpaper)
+                                if (success) {
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
+                                    settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
+                                    albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
+                                    setWallpaper(
+                                        context = context,
+                                        wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
+                                        darken = settings.darken,
+                                        darkenPercent = settings.homeDarkenPercentage,
+                                        scaling = settings.scaling,
+                                        blur = settings.blur,
+                                        blurPercent = settings.homeBlurPercentage,
+                                        vignette = settings.vignette,
+                                        vignettePercent = settings.homeVignettePercentage,
+                                        grayscale = settings.grayscale,
+                                        grayscalePercent = settings.homeGrayscalePercentage
+                                    )
+
+                                }
+                                else {
+                                    val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
+                                    if (wallpaperToDelete != null) {
+                                        albumRepository.deleteWallpaper(wallpaperToDelete)
+                                        albumRepository.upsertAlbumWithWallpaperAndFolder(
+                                            homeAlbum.copy(
+                                                wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
+                                                album = homeAlbum.album.copy(
+                                                    homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
+                                                    lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
+                                                )
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        if (homeAlbum != null) {
+                        else {
+                            val success = isValidUri(context, wallpaper)
                             if (success) {
                                 settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
+                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
                                 albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.drop(1)))
                                 setWallpaper(
                                     context = context,
@@ -306,185 +494,11 @@ class HomeWallpaperService: Service() {
                         }
                     }
                 }
-                // Case: Set home and lock screen wallpapers using the same album (home screen album)
-                settings.setHome && settings.setLock && !scheduleSeparately -> {
-                    var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
-                    if (wallpaper == null) {
-                        val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
-                        else homeAlbum.totalWallpapers.map { it.wallpaperUri }
-                        wallpaper = newWallpapers.firstOrNull()
-                        if (wallpaper == null) {
-                            Log.d("PaperizeWallpaperChanger", "No wallpaper found")
-                            albumRepository.cascadeDeleteAlbum(homeAlbum.album)
-                            onDestroy()
-                            return
-                        }
-                        else {
-                            val success = isValidUri(context, wallpaper)
-                            if (success) {
-                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
-                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
-                                albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
-                                setWallpaper(
-                                    context = context,
-                                    wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
-                                    darken = settings.darken,
-                                    darkenPercent = settings.homeDarkenPercentage,
-                                    scaling = settings.scaling,
-                                    blur = settings.blur,
-                                    blurPercent = settings.homeBlurPercentage,
-                                    vignette = settings.vignette,
-                                    vignettePercent = settings.homeVignettePercentage,
-                                    grayscale = settings.grayscale,
-                                    grayscalePercent = settings.homeGrayscalePercentage,
-                                    both = true
-                                )
-                            }
-                            else {
-                                val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
-                                if (wallpaperToDelete != null) {
-                                    albumRepository.deleteWallpaper(wallpaperToDelete)
-                                    albumRepository.upsertAlbumWithWallpaperAndFolder(
-                                        homeAlbum.copy(
-                                            wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
-                                            album = homeAlbum.album.copy(
-                                                homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
-                                                lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
-                                            )
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    else {
-                        val success = isValidUri(context, wallpaper)
-                        if (success) {
-                            settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
-                            settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
-                            albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.drop(1)))
-                            setWallpaper(
-                                context = context,
-                                wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
-                                darken = settings.darken,
-                                darkenPercent = settings.homeDarkenPercentage,
-                                scaling = settings.scaling,
-                                blur = settings.blur,
-                                blurPercent = settings.homeBlurPercentage,
-                                vignette = settings.vignette,
-                                vignettePercent = settings.homeVignettePercentage,
-                                grayscale = settings.grayscale,
-                                grayscalePercent = settings.homeGrayscalePercentage,
-                                both = true
-                            )
-
-                        }
-                        else {
-                            val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
-                            if (wallpaperToDelete != null) {
-                                albumRepository.deleteWallpaper(wallpaperToDelete)
-                                albumRepository.upsertAlbumWithWallpaperAndFolder(
-                                    homeAlbum.copy(
-                                        wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
-                                        album = homeAlbum.album.copy(
-                                            homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
-                                            lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
-                                        )
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-                // Case: Set home screen wallpaper (home screen album)
-                settings.setHome -> {
-                    var wallpaper = homeAlbum.album.homeWallpapersInQueue.firstOrNull()
-                    if (wallpaper == null) {
-                        val newWallpapers = if (settings.shuffle) homeAlbum.totalWallpapers.map { it.wallpaperUri }.shuffled()
-                        else homeAlbum.totalWallpapers.map { it.wallpaperUri }
-                        wallpaper = newWallpapers.firstOrNull()
-                        if (wallpaper == null) {
-                            Log.d("PaperizeWallpaperChanger", "No wallpaper found")
-                            albumRepository.cascadeDeleteAlbum(homeAlbum.album)
-                            onDestroy()
-                            return
-                        }
-                        else {
-                            val success = isValidUri(context, wallpaper)
-                            if (success) {
-                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
-                                settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
-                                albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = newWallpapers.drop(1)))
-                                setWallpaper(
-                                    context = context,
-                                    wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
-                                    darken = settings.darken,
-                                    darkenPercent = settings.homeDarkenPercentage,
-                                    scaling = settings.scaling,
-                                    blur = settings.blur,
-                                    blurPercent = settings.homeBlurPercentage,
-                                    vignette = settings.vignette,
-                                    vignettePercent = settings.homeVignettePercentage,
-                                    grayscale = settings.grayscale,
-                                    grayscalePercent = settings.homeGrayscalePercentage
-                                )
-
-                            }
-                            else {
-                                val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
-                                if (wallpaperToDelete != null) {
-                                    albumRepository.deleteWallpaper(wallpaperToDelete)
-                                    albumRepository.upsertAlbumWithWallpaperAndFolder(
-                                        homeAlbum.copy(
-                                            wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
-                                            album = homeAlbum.album.copy(
-                                                homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
-                                                lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
-                                            )
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    else {
-                        val success = isValidUri(context, wallpaper)
-                        if (success) {
-                            settingsDataStoreImpl.putString(SettingsConstants.CURRENT_HOME_WALLPAPER, wallpaper.toString())
-                            settingsDataStoreImpl.putString(SettingsConstants.CURRENT_LOCK_WALLPAPER, wallpaper.toString())
-                            albumRepository.upsertAlbum(homeAlbum.album.copy(homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.drop(1)))
-                            setWallpaper(
-                                context = context,
-                                wallpaper = wallpaper.decompress("content://com.android.externalstorage.documents/").toUri(),
-                                darken = settings.darken,
-                                darkenPercent = settings.homeDarkenPercentage,
-                                scaling = settings.scaling,
-                                blur = settings.blur,
-                                blurPercent = settings.homeBlurPercentage,
-                                vignette = settings.vignette,
-                                vignettePercent = settings.homeVignettePercentage,
-                                grayscale = settings.grayscale,
-                                grayscalePercent = settings.homeGrayscalePercentage
-                            )
-                        }
-                        else {
-                            val wallpaperToDelete = homeAlbum.wallpapers.find { it.wallpaperUri == wallpaper }
-                            if (wallpaperToDelete != null) {
-                                albumRepository.deleteWallpaper(wallpaperToDelete)
-                                albumRepository.upsertAlbumWithWallpaperAndFolder(
-                                    homeAlbum.copy(
-                                        wallpapers = homeAlbum.wallpapers.filterNot { it.wallpaperUri == wallpaper },
-                                        album = homeAlbum.album.copy(
-                                            homeWallpapersInQueue = homeAlbum.album.homeWallpapersInQueue.filterNot { it == wallpaper },
-                                            lockWallpapersInQueue = homeAlbum.album.lockWallpapersInQueue.filterNot { it == wallpaper }
-                                        )
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
             }
+            else {
+                Log.d("PaperizeWallpaperChanger", "Device is not interactive, skip change.")
+            }
+
 
             // Run notification
             val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)

@@ -18,5 +18,6 @@ data class WallpaperAlarmItem(
     val setLock: Boolean = false,
     val changeStartTime: Boolean = false,
     val startTime: Pair<Int, Int> = Pair(0, 0),
-    val shuffle: Boolean = true
+    val shuffle: Boolean = true,
+    val freezeOnScreenLock: Boolean = false,
 )
