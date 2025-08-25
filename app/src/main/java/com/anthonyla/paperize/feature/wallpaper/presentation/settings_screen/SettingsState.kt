@@ -41,7 +41,8 @@ data class SettingsState(
         val changeStartTime: Boolean = false,
         val startTime: Pair<Int, Int> = Pair(0, 0),
         val refresh: Boolean = true,
-        val freezeOnScreenLock: Boolean = false
+        val freezeOnScreenLock: Boolean = false,
+        val skipLandscape: Boolean = false
     )
 
     data class EffectSettings(
@@ -80,5 +81,6 @@ data class SettingsState(
         val homeAlbumName: String,
         val shuffle: Boolean,
         val freeze: Boolean,
+        val skipLandscape: Boolean
     )
 }

@@ -110,6 +110,7 @@ class SettingsViewModel @Inject constructor(
         settingsDataStoreImpl.getBooleanFlow(SettingsConstants.SHUFFLE),
         settingsDataStoreImpl.getBooleanFlow(SettingsConstants.REFRESH),
         settingsDataStoreImpl.getBooleanFlow(SettingsConstants.FREEZE_ON_SCREEN_LOCK),
+        settingsDataStoreImpl.getBooleanFlow(SettingsConstants.SKIP_LANDSCAPE)
     ) { flows ->
         ScheduleSettings(
             scheduleSeparately = flows[0] as Boolean? ?: false,
@@ -121,7 +122,8 @@ class SettingsViewModel @Inject constructor(
             startTime = Pair(flows[6] as Int? ?: 0, flows[7] as Int? ?: 0),
             shuffle = flows[8] as Boolean? ?: true,
             refresh = flows[9] as Boolean? ?: true,
-            freezeOnScreenLock = flows[10] as Boolean? ?: false
+            freezeOnScreenLock = flows[10] as Boolean? ?: false,
+            skipLandscape = flows[11] as Boolean? ?: false
         )
     }
 
@@ -551,7 +553,18 @@ class SettingsViewModel @Inject constructor(
 
             is SettingsEvent.SetFreeze -> {
                 viewModelScope.launch {
-                    settingsDataStoreImpl.putBoolean(SettingsConstants.FREEZE_ON_SCREEN_LOCK, event.freeze)
+                    settingsDataStoreImpl.putBoolean(
+                        SettingsConstants.FREEZE_ON_SCREEN_LOCK,
+                        event.freeze
+                    )
+                }
+            }
+            is SettingsEvent.SetSkipLandscape -> {
+                viewModelScope.launch {
+                    settingsDataStoreImpl.putBoolean(
+                        SettingsConstants.SKIP_LANDSCAPE,
+                        event.skipLandscape
+                    )
                 }
             }
 
@@ -598,7 +611,8 @@ class SettingsViewModel @Inject constructor(
                         SettingsConstants.START_MINUTE,
                         SettingsConstants.SHUFFLE,
                         SettingsConstants.REFRESH,
-                        SettingsConstants.FREEZE_ON_SCREEN_LOCK
+                        SettingsConstants.FREEZE_ON_SCREEN_LOCK,
+                        SettingsConstants.SKIP_LANDSCAPE,
                     )
                     settingsDataStoreImpl.clear(keysToDelete)
                 }
